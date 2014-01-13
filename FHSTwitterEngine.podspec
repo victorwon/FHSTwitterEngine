@@ -9,4 +9,5 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/mglagola/FHSTwitterEngine.git", :tag => s.version.to_s }
   s.source_files  = 'FHSTwitterEngine', 'FHSTwitterEngine/*.{h,m}'
   s.framework  = 'SystemConfiguration'
+  s.requires_arc = true
 end
