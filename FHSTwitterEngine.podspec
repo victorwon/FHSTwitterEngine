@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = "FHSTwitterEngine"
-  s.version      = "0.0.1"
+  s.version      = "0.0.3"
   s.summary      = "A short description of FHSTwitterEngine."
   s.homepage     = "https://github.com/mglagola/FHSTwitterEngine"
   s.license      = 'MIT'
