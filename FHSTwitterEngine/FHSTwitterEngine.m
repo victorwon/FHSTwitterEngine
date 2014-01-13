@@ -229,16 +229,6 @@ id removeNull(id rootObject) {
 
 @end
 
-@interface FHSTwitterEngineController : UIViewController <UIWebViewDelegate> 
-
-@property (nonatomic, strong) UINavigationBar *navBar;
-@property (nonatomic, strong) UIWebView *theWebView;
-@property (nonatomic, strong) UILabel *loadingText;
-@property (nonatomic, strong) UIActivityIndicatorView *spinner;
-@property (nonatomic, strong) FHSToken *requestToken;
-
-@end
-
 @interface FHSTwitterEngine ()
 
 // Login stuff
