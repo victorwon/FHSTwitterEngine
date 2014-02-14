@@ -264,7 +264,7 @@ extern NSString * const FHSErrorDomain;
 - (NSError *)createListWithName:(NSString *)name isPrivate:(BOOL)isPrivate description:(NSString *)description;
 
 // tweets/search
-- (id)searchTweetsWithQuery:(NSString *)q count:(int)count resultType:(FHSTwitterEngineResultType)resultType unil:(NSDate *)untilDate sinceID:(NSString *)sinceID maxID:(NSString *)maxID;
+- (id)searchTweetsWithQuery:(NSString *)q count:(int)count resultType:(FHSTwitterEngineResultType)resultType until:(NSDate *)untilDate sinceID:(NSString *)sinceID maxID:(NSString *)maxID;
 
 // followers/ids
 - (id)getFollowersIDs;
