@@ -33,6 +33,13 @@
 #import <netinet/in.h>
 #import <ifaddrs.h>
 
+// Helper classes
+#include "FHSStream.h"
+
+static NSURLRequestCachePolicy const cachePolicy = NSURLRequestReloadRevalidatingCacheData;
+
+static float const streamingTimeoutInterval = 30.0f;
+
 static char const Encode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static NSString * const newPinJS = @"var d = document.getElementById('oauth-pin'); if (d == null) d = document.getElementById('oauth_pin'); if (d) { var d2 = d.getElementsByTagName('code'); if (d2.length > 0) d2[0].innerHTML; }";
@@ -52,6 +59,10 @@ NSString * const FHSProfileDescriptionKey = @"description";
 NSString * const FHSErrorDomain = @"FHSErrorDomain";
 
 static NSString * const authBlockKey = @"FHSTwitterEngineOAuthCompletion";
+
+//
+// URL constants
+//
 
 static NSString * const url_search_tweets = @"https://api.twitter.com/1.1/search/tweets.json";
 
@@ -266,9 +277,12 @@ id removeNull(id rootObject) {
 	return (__bridge NSString *)url;
 }
 
+- (NSString *)fhs_truncatedToLength:(int)length {
+    return [self substringToIndex:MIN(length, self.length)];
+}
+
 - (NSString *)fhs_trimForTwitter {
-    NSString *string = [self stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    return (string.length > 140)?[string substringToIndex:140]:string;
+    return [self fhs_truncatedToLength:140];
 }
 
 - (NSString *)fhs_stringWithRange:(NSRange)range {
@@ -692,6 +706,7 @@ id removeNull(id rootObject) {
     NSURL *baseURL = [NSURL URLWithString:url_statuses_update_with_media];
     
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"status"] = tweetString;
     params[@"media[]"] = theData;
     
     if (irt.length > 0) {
@@ -788,6 +803,34 @@ id removeNull(id rootObject) {
         }
 
         return ret;
+    }
+    
+    return [NSError badRequestError];
+}
+
+- (id)getProfileImageURLStringForUsername:(NSString *)username andSize:(FHSTwitterEngineImageSize)size {
+    
+    if (username.length == 0) {
+        return [NSError badRequestError];
+    }
+    
+    NSURL *baseURL = [NSURL URLWithString:url_users_show];
+    id userShowReturn = [self sendGETRequestForURL:baseURL andParams:@{ @"screen_name":username }];
+    
+    if ([userShowReturn isKindOfClass:[NSError class]]) {
+        return userShowReturn;
+    } else if ([userShowReturn isKindOfClass:[NSDictionary class]]) {
+        NSString *url = userShowReturn[@"profile_image_url"]; // normal
+        
+        if (size == 0) { // mini
+            url = [url stringByReplacingOccurrencesOfString:@"_normal" withString:@"_mini"];
+        } else if (size == 2) { // bigger
+            url = [url stringByReplacingOccurrencesOfString:@"_normal" withString:@"_bigger"];
+        } else if (size == 3) { // original
+            url = [url stringByReplacingOccurrencesOfString:@"_normal" withString:@""];
+        }
+        
+        return url;
     }
     
     return [NSError badRequestError];
@@ -1384,6 +1427,80 @@ id removeNull(id rootObject) {
     return parsedJSONResponse;
 }
 
+//
+// Streaming API
+//
+
+// check out the streaming parameters here:
+// https://dev.twitter.com/docs/streaming-apis/parameters
+
+- (NSString *)generateTrackParameter:(NSArray *)keywords {
+    NSMutableArray *sanitized = [NSMutableArray arrayWithCapacity:keywords.count];
+    
+    for (NSString *string in keywords) {
+        [sanitized addObject:[string fhs_truncatedToLength:60]];
+    }
+    
+    return [sanitized componentsJoinedByString:@","];
+}
+
+
+// Actual calls to the Twitter API
+
+- (void)streamUserMessagesWith:(NSArray *)with replies:(BOOL)replies keywords:(NSArray *)keywords locationBox:(NSArray *)locBox block:(StreamBlock)block {
+    NSMutableDictionary *params = @{ @"stringify_friend_ids": @"true" }.mutableCopy;
+    
+    if (with.count > 0) {
+        params[@"with"] = [with componentsJoinedByString:@","];
+    }
+    
+    if (keywords.count > 0) {
+        params[@"track"] = [self generateTrackParameter:keywords];
+    }
+    
+    if (locBox.count == 4) {
+        params[@"locations"] = [locBox componentsJoinedByString:@","];
+    }
+    
+    [[FHSStream streamWithURL:@"https://userstream.twitter.com/1.1/user.json" httpMethod:@"POST" parameters:params timeout:streamingTimeoutInterval block:block]start]; // Twitter says it should be GET, but on further investigation of the docs, POST works too.
+}
+
+- (void)streamPublicStatusesForUsers:(NSArray *)users keywords:(NSArray *)keywords locationBox:(NSArray *)locBox block:(StreamBlock)block {
+    BOOL usersValid = users.count > 0 && users.count < 5000;
+    BOOL keywordsValid = keywords.count > 0 && keywords.count < 400;
+    BOOL locBoxValid = locBox.count == 4;
+    
+    if (!usersValid && !keywordsValid && !locBoxValid) {
+        NSError *error = [NSError errorWithDomain:FHSErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey: @"Bad Request: invalid parameters: POST statuses/filter requires at least one predicate parameter (follow, locations, or track)."}];
+        block(error, NULL);
+        return;
+    }
+    
+    NSMutableDictionary *params = [NSMutableDictionary dictionaryWithCapacity:5];
+
+    if (usersValid) {
+        params[@"follow"] = [users componentsJoinedByString:@","];
+    }
+    
+    if (keywordsValid) {
+        params[@"track"] = [self generateTrackParameter:keywords];
+    }
+    
+    if (locBoxValid) {
+        params[@"locations"] = [locBox componentsJoinedByString:@","];
+    }
+    
+    [[FHSStream streamWithURL:@"https://stream.twitter.com/1.1/statuses/filter.json" httpMethod:@"POST" parameters:params timeout:streamingTimeoutInterval block:block]start];
+}
+
+- (void)streamSampleStatusesWithBlock:(StreamBlock)block {
+    [[FHSStream streamWithURL:@"https://stream.twitter.com/1.1/statuses/sample.json" httpMethod:@"GET" parameters:nil timeout:streamingTimeoutInterval block:block]start];
+}
+
+- (void)streamFirehoseWithBlock:(StreamBlock)block {
+    [[FHSStream streamWithURL:@"https://stream.twitter.com/1.1/statuses/firehose.json" httpMethod:@"GET" parameters:nil timeout:streamingTimeoutInterval block:block]start];
+}
+
 - (instancetype)init {
     self = [super init];
     if (self) {
@@ -1394,6 +1511,8 @@ id removeNull(id rootObject) {
         _dateFormatter.dateStyle = NSDateFormatterLongStyle;
         _dateFormatter.formatterBehavior = NSDateFormatterBehavior10_4;
         _dateFormatter.dateFormat = @"EEE MMM dd HH:mm:ss ZZZZ yyyy";
+        
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(cancelTouched:) name:@"FHSTwitterEngineControllerDidCancel" object:nil];
     }
     return self;
 }
@@ -1559,13 +1678,73 @@ id removeNull(id rootObject) {
     [request setValue:oauthHeader forHTTPHeaderField:@"Authorization"];
 }
 
-- (NSError *)sendPOSTRequestForURL:(NSURL *)url andParams:(NSDictionary *)params {
+- (int)parameterLengthForURL:(NSString *)url params:(NSMutableDictionary *)params {
+    int length = url.length;
+
+    for (NSString *key in params) {
+        length += [key fhs_URLEncode].length;
+        length += [params[key] fhs_URLEncode].length;
+        length += 1; // for the equal sign
+    }
     
+    return length;
+}
+
+- (NSError *)checkAuth {
     if (![self isAuthorized]) {
         [self loadAccessToken];
         if (![self isAuthorized]) {
-            return [NSError errorWithDomain:FHSErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"You are not authorized via OAuth", @"url": url, @"parameters": params}];
+            return [NSError errorWithDomain:FHSErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"You are not authorized via OAuth."}];
         }
+    }
+    return nil;
+}
+
+- (NSError *)checkError:(id)json {
+    if ([json isKindOfClass:[NSDictionary class]]) {
+        NSArray *errors = json[@"errors"];
+        
+        if (errors.count > 0) {
+            return [NSError errorWithDomain:FHSErrorDomain code:418 userInfo:@{NSLocalizedDescriptionKey: @"Multiple Errors", @"errors": errors}];
+        }
+    }
+    return nil;
+}
+
+- (NSData *)POSTBodyWithParams:(NSDictionary *)params boundary:(NSString *)boundary {
+    NSMutableData *body = [NSMutableData dataWithLength:0];
+    
+    for (NSString *key in params.allKeys) {
+        id obj = params[key];
+        
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        
+        NSData *data = nil;
+        
+        [body appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"\r\n",key] dataUsingEncoding:NSUTF8StringEncoding]];
+        
+        if ([obj isKindOfClass:[NSData class]]) {
+            [body appendData:[@"Content-Type: application/octet-stream\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+            data = (NSData *)obj;
+        } else if ([obj isKindOfClass:[NSString class]]) {
+            data = [[NSString stringWithFormat:@"%@",(NSString *)obj]dataUsingEncoding:NSUTF8StringEncoding];
+        }
+        
+        [body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:data];
+        [body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    }
+    
+    [body appendData:[[NSString stringWithFormat:@"--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    return body;
+}
+
+- (NSError *)sendPOSTRequestForURL:(NSURL *)url andParams:(NSDictionary *)params {
+    
+    NSError *authError = [self checkAuth];
+    
+    if (authError) {
+        return authError;
     }
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:30.0f];
@@ -1579,58 +1758,24 @@ id removeNull(id rootObject) {
     
     [self signRequest:request];
     
-    NSMutableData *body = [NSMutableData dataWithLength:0];
-
-    for (NSString *key in params.allKeys) {
-        id obj = params[key];
-
-        [body appendData:[[NSString stringWithFormat:@"--%@\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-        
-        NSData *data = nil;
-        
-        if ([obj isKindOfClass:[NSData class]]) {
-            [body appendData:[@"Content-Type: application/octet-stream\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-            data = (NSData *)obj;
-        } else if ([obj isKindOfClass:[NSString class]]) {
-            data = [[NSString stringWithFormat:@"%@\r\n",(NSString *)obj]dataUsingEncoding:NSUTF8StringEncoding];
-        }
-        
-        [body appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"\r\n",key] dataUsingEncoding:NSUTF8StringEncoding]];
-        
-        [body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-        [body appendData:data];
-    }
-    
-    [body appendData:[[NSString stringWithFormat:@"--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    
+    NSData *body = [self POSTBodyWithParams:params boundary:boundary];
     [request setValue:@(body.length).stringValue forHTTPHeaderField:@"Content-Length"];
     request.HTTPBody = body;
     
     id retobj = [self sendRequest:request];
     
-    if (retobj == nil) {
+    if (!retobj) {
         return [NSError noDataError];
-    }
-    
-    if ([retobj isKindOfClass:[NSError class]]) {
+    } else if ([retobj isKindOfClass:[NSError class]]) {
         return retobj;
     }
     
     id parsed = removeNull([NSJSONSerialization JSONObjectWithData:(NSData *)retobj options:NSJSONReadingMutableContainers error:nil]);
     
-    if ([parsed isKindOfClass:[NSDictionary class]]) {
-        NSString *errorMessage = parsed[@"error"];
-        NSArray *errorArray = parsed[@"errors"];
-        if (errorMessage.length > 0) {
-            return [NSError errorWithDomain:FHSErrorDomain code:[parsed[@"code"] intValue] userInfo:@{NSLocalizedDescriptionKey: errorMessage, @"request":request}];
-        } else if (errorArray.count > 0) {
-            if (errorArray.count > 1) {
-                return [NSError errorWithDomain:FHSErrorDomain code:418 userInfo:@{NSLocalizedDescriptionKey:@"There were multiple errors when processing the request.", @"request":request}];
-            } else {
-                NSDictionary *theError = errorArray[0];
-                return [NSError errorWithDomain:FHSErrorDomain code:[theError[@"code"]integerValue] userInfo:@{NSLocalizedDescriptionKey: theError[@"message"], @"request":request}];
-            }
-        }
+    NSError *error = [self checkError:parsed];
+    
+    if (error) {
+        return error;
     }
     
     return nil; // eventually return the parsed response
@@ -1638,11 +1783,10 @@ id removeNull(id rootObject) {
 
 - (id)sendGETRequestForURL:(NSURL *)url andParams:(NSDictionary *)params {
     
-    if (![self isAuthorized]) {
-        [self loadAccessToken];
-        if (![self isAuthorized]) {
-            return [NSError errorWithDomain:FHSErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"You are not authorized via OAuth", @"url": url, @"parameters": params}];
-        }
+    NSError *authError = [self checkAuth];
+    
+    if (authError) {
+        return authError;
     }
     
     if (params.count > 0) {
@@ -1663,32 +1807,61 @@ id removeNull(id rootObject) {
 
     id retobj = [self sendRequest:request];
     
-    if (retobj == nil) {
+    if (!retobj) {
         return [NSError noDataError];
-    }
-    
-    if ([retobj isKindOfClass:[NSError class]]) {
+    } else if ([retobj isKindOfClass:[NSError class]]) {
         return retobj;
     }
     
     id parsed = removeNull([NSJSONSerialization JSONObjectWithData:(NSData *)retobj options:NSJSONReadingMutableContainers error:nil]);
     
-    if ([parsed isKindOfClass:[NSDictionary class]]) {
-        NSString *errorMessage = parsed[@"error"];
-        NSArray *errorArray = parsed[@"errors"];
-        if (errorMessage.length > 0) {
-            return [NSError errorWithDomain:FHSErrorDomain code:[parsed[@"code"] intValue] userInfo:@{NSLocalizedDescriptionKey: errorMessage, @"request":request}];
-        } else if (errorArray.count > 0) {
-            if (errorArray.count > 1) {
-                return [NSError errorWithDomain:FHSErrorDomain code:418 userInfo:@{NSLocalizedDescriptionKey:@"There were multiple errors when processing the request.", @"request":request}];
-            } else {
-                NSDictionary *theError = errorArray[0];
-                return [NSError errorWithDomain:FHSErrorDomain code:[theError[@"code"]integerValue] userInfo:@{NSLocalizedDescriptionKey: theError[@"message"], @"request":request}];
-            }
-        }
+    NSError *error = [self checkError:parsed];
+    
+    if (error) {
+        return error;
     }
     
     return parsed;
+}
+
+- (id)streamingRequestForURL:(NSURL *)url HTTPMethod:(NSString *)method parameters:(NSDictionary *)params {
+    
+    NSError *authError = [self checkAuth];
+    
+    if (authError) {
+        return authError;
+    }
+    
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:cachePolicy timeoutInterval:MAXFLOAT]; // timeouts are handled manually
+    [request setHTTPMethod:method];
+    [request setHTTPShouldHandleCookies:NO];
+    
+    // Only POST and GET are relevant to the Twitter API
+    
+    if ([method isEqualToString:@"POST"]) {
+        NSString *boundary = [NSString fhs_UUID];
+        NSString *contentType = [NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary];
+        [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
+        NSData *body = [self POSTBodyWithParams:params boundary:boundary];
+        [request setValue:@(body.length).stringValue forHTTPHeaderField:@"Content-Length"];
+        request.HTTPBody = body;
+    } else if ([method isEqualToString:@"GET"]) {
+        if (params.count > 0) {
+            NSMutableArray *paramPairs = [NSMutableArray arrayWithCapacity:params.count];
+            
+            for (NSString *key in params) {
+                NSString *paramPair = [NSString stringWithFormat:@"%@=%@",[key fhs_URLEncode],[params[key] fhs_URLEncode]];
+                [paramPairs addObject:paramPair];
+            }
+            
+            url = [NSURL URLWithString:[NSString stringWithFormat:@"%@?%@",fhs_url_remove_params(url), [paramPairs componentsJoinedByString:@"&"]]];
+        }
+    } else {
+        return [NSError errorWithDomain:FHSErrorDomain code:-400 userInfo:@{}];
+    }
+    
+    [self signRequest:request];
+    return request;
 }
 
 //
@@ -1931,8 +2104,15 @@ id removeNull(id rootObject) {
     return NO;
 }
 
+- (void)cancelTouched:(NSNotification *)notification {
+    if ( [_delegate respondsToSelector:@selector(twitterEngineControllerDidCancel)] ) {
+        [_delegate twitterEngineControllerDidCancel];
+    }
+}
+
 - (void)dealloc {
     [self setDelegate:nil];
+    [[NSNotificationCenter defaultCenter]removeObserver:self];
 }
 
 @end
@@ -1947,7 +2127,7 @@ id removeNull(id rootObject) {
     self.view.backgroundColor = [UIColor lightGrayColor];
     self.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     
-    self.navBar = [[UINavigationBar alloc]initWithFrame:CGRectMake(0, 0, 320, (UIDevice.currentDevice.systemVersion.floatValue >= 7.0f)?64:44)];
+    self.navBar = [[UINavigationBar alloc]initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, (UIDevice.currentDevice.systemVersion.floatValue >= 7.0f)?64:44)];
     _navBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
     UINavigationItem *navItem = [[UINavigationItem alloc]initWithTitle:@"Twitter Login"];
 	navItem.leftBarButtonItem = [[UIBarButtonItem alloc]initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(close)];
@@ -2093,7 +2273,7 @@ id removeNull(id rootObject) {
 	char *raw = data?(char *)[data bytes]:"";
 	
 	if (raw && (strstr(raw, "cancel=") || strstr(raw, "deny="))) {
-		[self dismissViewControllerAnimated:YES completion:nil];
+        [self close];
 		return NO;
 	}
     
@@ -2101,7 +2281,9 @@ id removeNull(id rootObject) {
 }
 
 - (void)close {
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [self dismissViewControllerAnimated:YES completion:^(void){
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"FHSTwitterEngineControllerDidCancel" object:nil userInfo:nil];
+    }];
 }
 
 - (void)dismissViewControllerAnimated:(BOOL)flag completion:(void (^)(void))completion {

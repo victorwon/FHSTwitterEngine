@@ -105,7 +105,7 @@ While you can use any threading technology for threading, I recommend Grand Cent
 
 **General Comments**
 
-`FHSTwitterEngine` will attempt to preëmtively detect errors in your requests, before they are actually sent. This includes missing parameters, and a lack of authorization. If FHSTwitterEngine detects that a user is not logged in, it will attempt to load an access token using its delegate. This process is designed to prevent bad requests from being needlessly sent.
+`FHSTwitterEngine` will attempt to preemptively detect errors in your requests, before they are actually sent. This includes missing parameters, and a lack of authorization. If FHSTwitterEngine detects that a user is not logged in, it will attempt to load an access token using its delegate. This process is designed to prevent bad requests from being needlessly sent.
 
 **About requests**
 
@@ -120,10 +120,15 @@ Most methods return `id`. The returned object can be a(n):
 
 **For the future/To Do**
 
-You should probably [email](mailto:nate@natesymer.com) me with suggestions.
+You can [email](mailto:nate@natesymer.com) me with suggestions or open an [issue](https://github.com/fhsjaagshs/FHSTwitterEngine/issues).
 
 - OS X OAuth login window
 - Custom objects for profile settings
+- Tag releases
+- Tests
+- Add license
+- Create a CocoaPod
+- Make demo universal
 
 **Debugging 101 for outsource developers**
 
