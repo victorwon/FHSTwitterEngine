@@ -2264,6 +2264,12 @@ id removeNull(id rootObject) {
 
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     
+    if ([request.URL.absoluteString rangeOfString:@"/signup?"].location != NSNotFound) {
+        // open twitter sign up in external safari as it's hard and confusing to let user signup in app
+        [[UIApplication sharedApplication] openURL:request.URL];
+        return NO;
+    }
+    
     if (strstr([request.URL.absoluteString UTF8String], "denied=")) {
 		[self dismissViewControllerAnimated:YES completion:nil];
         return NO;
