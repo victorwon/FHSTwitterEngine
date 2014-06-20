@@ -1,13 +1,16 @@
-Pod::Spec.new do |s|
-  s.name         = "FHSTwitterEngine"
-  s.version      = "0.0.3"
-  s.summary      = "A short description of FHSTwitterEngine."
-  s.homepage     = "https://github.com/mglagola/FHSTwitterEngine"
-  s.license      = 'MIT'
-  s.author         = "fhsjaagshs", "mglagola"
-  s.platform     = :ios, '6.0'
-  s.source       = { :git => "https://github.com/mglagola/FHSTwitterEngine.git", :tag => s.version.to_s }
-  s.source_files  = 'FHSTwitterEngine', 'FHSTwitterEngine/*.{h,m}'
-  s.framework  = 'SystemConfiguration'
-  s.requires_arc = true
+Pod::Spec.new do |spec|
+	spec.name = "FHSTwitterEngine"
+	spec.version = "2.0a"
+	spec.summary = "Twitter API for Cocoa developers"
+	spec.homepage = "https://github.com/fhsjaagshs/FHSTwitterEngine"	
+	spec.license = { :type => "MIT", :file => "LICENSE" }
+	spec.authors = { "Nathaniel Symer" => "nate@natesymer.com", "Daniel Khamsing" => "dkhamsing8@gmail.com" }
+	spec.source = {
+		:git => "https://github.com/victorwon/FHSTwitterEngine.git",
+		:tag => "v2.0a"
+	}
+	spec.source_files = "FHSTwitterEngine/*.{h,m}"
+	spec.requires_arc = true
+	spec.platform = :ios
+	spec.ios.frameworks = 'Accounts', 'Social'	
 end

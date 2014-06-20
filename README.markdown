@@ -7,29 +7,23 @@ Created by [Nathaniel Symer](mailto:nate@natesymer.com), aka [@natesymer](http:/
 
 `FHSTwitterEngine` can:
 
-- Authenicate using OAuth and/or xAuth.
-- Make a request to just about every API endpoint.
+- Authenicate using OAuth, xAuth, and iOS Reverse auth.
+- Make a request to just about every API resource.
 
 Why you should use `FHSTwitterEngine`:
 
-- Single .h/.m pair
-- No dependencies
+- No 3rd party dependencies
+- Authentication options
 - Shared instance
 - Scientific
 
-Where did OAuthConsumer go? It's gone :) because there were a number of issues with it:
-
-1. It had too much compatibility code
-2. It concatenated and signed POST params
-3. It could not take raw data as post params by design (see #2)
-4. It duplicated functionality I already implemented.
-
 **Setup**
 
-1. Add `FHSTwitterEngine.h` and `FHSTwitterEngine.m` to your project
+1. Add the `FHSTwitterEngine` folder to your project.
 2. `#import "FHSTwitterEngine.h"` where necessary
 3. Link against `SystemConfiguration.framework`
-4. Enable ARC for both files if applicable
+4. Enable ARC for the `FHSTwitterEngine` folder (if necessary)
+5. Link against `Social.framework` and `Accounts.framework` if you're using the FHSTwitterEngine+iOS category for reverse auth.
 
 **Usage:**
 
@@ -40,14 +34,32 @@ Where did OAuthConsumer go? It's gone :) because there were a number of issues w
  
     [[FHSTwitterEngine sharedEngine]temporarilySetConsumerKey:@"<consumer_key>" andSecret:@"<consumer_secret>"];
          
-> Set access token delegate (see header)
+> Set access token loading/storing blocks
 
-    [[FHSTwitterEngine sharedEngine]setDelegate:myDelegate]; 
+	FHSTwitterEngine.sharedEngine.storeAccessTokenBlock = ^(NSString *accessToken) {
+    	// save access token  
+    };
+    
+    FHSTwitterEngine.sharedEngine.loadAccessTokenBlock = ^NSString *(void) {
+    	return @"<access_token>"; // you can load it from anywhere you want!
+    };
     
 > Login via OAuth:
-    
-    UIViewController *loginController = [[FHSTwitterEngine sharedEngine]loginControllerWithCompletionHandler:^(BOOL success) {
-        NSLog(success?@"L0L success":@"O noes!!! Loggen faylur!!!");
+
+	FHSTwitterEngineController *loginController = [FHSTwitterEngineController controllerWithCompletionBlock:^(FHSTwitterEngineControllerResult result) {
+        switch (result) {
+            case FHSTwitterEngineControllerResultCancelled:
+                NSLog(@"Login Controller Cancelled");
+                break;
+            case FHSTwitterEngineControllerResultFailed:
+                NSLog(@"Login Controller Failed");
+                break;
+            case FHSTwitterEngineControllerResultSucceeded:
+                NSLog(@"Login Controller Succeeded");
+                break;
+            default:
+                break;
+        }
     }];
     [self presentViewController:loginController animated:YES completion:nil];
     
@@ -55,7 +67,7 @@ Where did OAuthConsumer go? It's gone :) because there were a number of issues w
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     	@autoreleasepool {
-    		NSError *error = [[FHSTwitterEngine sharedEngine]getXAuthAccessTokenForUsername:@"<username>" password:@"<password>"];
+    		NSError *error = [[FHSTwitterEngine sharedEngine]authenticateWithUsername:@"<username>"" password:@"<password>""];
         	// Handle error
         	dispatch_sync(dispatch_get_main_queue(), ^{
     			@autoreleasepool {
@@ -86,7 +98,7 @@ Where did OAuthConsumer go? It's gone :) because there were a number of issues w
     dispatch_async((dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     	@autoreleasepool {
     		id twitterData = [[FHSTwitterEngine sharedEngine]postTweet:@"Hi!"];
-    		// Handle twitterData (see "About GET Requests")
+    		// Handle twitterData
     		dispatch_sync(dispatch_get_main_queue(), ^{
     			@autoreleasepool {
         			// Update UI
@@ -122,13 +134,13 @@ Most methods return `id`. The returned object can be a(n):
 
 You can [email](mailto:nate@natesymer.com) me with suggestions or open an [issue](https://github.com/fhsjaagshs/FHSTwitterEngine/issues).
 
-- OS X OAuth login window
-- Custom objects for profile settings
+- OS X compatibility
 - Tag releases
 - Tests
-- Add license
-- Create a CocoaPod
-- Make demo universal
+- <strike>Add license</strike>
+- <strike>Create a CocoaPod</strike> Add podspec to cocoapods
+- <strike>Make demo universal</strike>
+- <strike>Split up FHSTwitterEngine.{h,m}</strike>
 
 **Debugging 101 for outsource developers**
 

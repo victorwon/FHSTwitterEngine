@@ -8,8 +8,13 @@
 
 #import "ViewController.h"
 #import "FHSTwitterEngine.h"
+#import "FHSOAuthLoginController.h"
+#import "FHSTwitterEngine+Requests.h"
+#import "FHSTwitterEngine+iOS.h"
 
-@interface ViewController () <FHSTwitterEngineAccessTokenDelegate, UIAlertViewDelegate, UITableViewDataSource, UITableViewDelegate>
+static NSString * const TwitPicAPIKey = @"dc85de02fa89e78ecc41804617a5b171";
+
+@interface ViewController () <UIAlertViewDelegate, UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate>
 
 @property (nonatomic, strong) UITableView *theTableView;
 @property (nonatomic, assign) BOOL isStreaming;
@@ -30,16 +35,20 @@
     _theTableView.scrollIndicatorInsets = _theTableView.contentInset;
     [self.view addSubview:_theTableView];
     
-    UINavigationBar *bar = [[UINavigationBar alloc]initWithFrame:CGRectMake(0, 0, 320, (UIDevice.currentDevice.systemVersion.floatValue >= 7.0f)?64:44)];
+    UINavigationBar *bar = [[UINavigationBar alloc]initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, (UIDevice.currentDevice.systemVersion.floatValue >= 7.0f)?64:44)];
     bar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
     UINavigationItem *navItem = [[UINavigationItem alloc]initWithTitle:@"FHSTwitterEngine"];
-	navItem.leftBarButtonItem = [[UIBarButtonItem alloc]initWithTitle:@"XAuth" style:UIBarButtonItemStylePlain target:self action:@selector(loginXAuth)];
-    navItem.rightBarButtonItem = [[UIBarButtonItem alloc]initWithTitle:@"OAuth" style:UIBarButtonItemStylePlain target:self action:@selector(loginOAuth)];
-	[bar pushNavigationItem:navItem animated:NO];
+	
+    navItem.rightBarButtonItem = [[UIBarButtonItem alloc]initWithTitle:@"Auth" style:UIBarButtonItemStylePlain target:self action:@selector(auth)];
+    
+    [bar pushNavigationItem:navItem animated:NO];
     [self.view addSubview:bar];
     
-    [[FHSTwitterEngine sharedEngine]permanentlySetConsumerKey:@"Xg3ACDprWAH8loEPjMzRg" andSecret:@"9LwYDxw1iTc6D9ebHdrYCZrJP4lJhQv5uf4ueiPHvJ0"];
-    [[FHSTwitterEngine sharedEngine]setDelegate:self];
+    // This is if you want to use xAuth
+    // It uses the keys from Feathers (by Naklab) without the developer's permission.
+    [[FHSTwitterEngine sharedEngine]permanentlySetConsumerKey:@"iD3JmMTXZ36MlISkfmkFvg" andSecret:@"B7HLYGJpwnyZr8fJeUGidW129i3cpgI2WsyGsHM2s"];
+    
+ //   [[FHSTwitterEngine sharedEngine]permanentlySetConsumerKey:@"Xg3ACDprWAH8loEPjMzRg" andSecret:@"9LwYDxw1iTc6D9ebHdrYCZrJP4lJhQv5uf4ueiPHvJ0"];
     [[FHSTwitterEngine sharedEngine]loadAccessToken];
 }
 
@@ -96,13 +105,32 @@
             break;
         case 3:
             cell.textLabel.text = @"Logout";
-            cell.detailTextLabel.text = FHSTwitterEngine.sharedEngine.authenticatedUsername;
+            cell.detailTextLabel.text = FHSTwitterEngine.sharedEngine.accessToken.username;
             break;
         default:
             break;
     }
     
     return cell;
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {
+    switch (buttonIndex) {
+        case 0:
+            [self loginOAuth];
+            break;
+            
+        case 1:
+            [self loginReverseAuth];
+            break;
+            
+        case 2:
+            [self loginXAuth];
+            break;
+            
+        default:
+            break;
+    }
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
@@ -145,7 +173,7 @@
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 @autoreleasepool {
                     // getXAuthAccessTokenForUsername:password: returns an NSError, not id.
-                    NSError *returnValue = [[FHSTwitterEngine sharedEngine]getXAuthAccessTokenForUsername:username password:password];
+                    NSError *returnValue = [[FHSTwitterEngine sharedEngine]authenticateWithUsername:username password:password];
                     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
                     
                     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -171,9 +199,46 @@
     return [[NSUserDefaults standardUserDefaults]objectForKey:@"SavedAccessHTTPBody"];
 }
 
+
+- (void)auth {
+    UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:@"FHSTwitterEngine Auth Methods" delegate:self cancelButtonTitle:@"Cancel" destructiveButtonTitle:nil  otherButtonTitles:@"OAuth", @"Reverse Auth", @"XAuth", nil];
+    [sheet showInView:self.view];
+}
+
+- (void)loginReverseAuth {
+    // Check if user has set up Twitter
+    if (![SLComposeViewController isAvailableForServiceType:SLServiceTypeTwitter]) {
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Oops" message:@"Twitter is no setup on this device, change this in Settings." delegate:nil cancelButtonTitle:@"Dismiss" otherButtonTitles: nil];
+        [alert show];
+        return;
+    }
+    
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = YES;
+    
+    [FHSTwitterEngine.sharedEngine reverseAuthWithAccountSelectionBlock:^ACAccount *(NSArray *accounts) {
+        return accounts.firstObject;
+    } completion:^(BOOL success) {
+        NSLog(@"Reverse auth %@",success?@"succeeded":@"failed");
+        [_theTableView reloadData];
+        [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
+    }];
+}
+
 - (void)loginOAuth {
-    UIViewController *loginController = [[FHSTwitterEngine sharedEngine]loginControllerWithCompletionHandler:^(BOOL success) {
-        NSLog(success?@"L0L success":@"O noes!!! Loggen faylur!!!");
+    FHSOAuthLoginController *loginController = [FHSOAuthLoginController controllerWithCompletionBlock:^(FHSTwitterEngineControllerResult result) {
+        switch (result) {
+            case FHSTwitterEngineControllerResultCancelled:
+                NSLog(@"Login Controller Cancelled");
+                break;
+            case FHSTwitterEngineControllerResultFailed:
+                NSLog(@"Login Controller Failed");
+                break;
+            case FHSTwitterEngineControllerResultSucceeded:
+                NSLog(@"Login Controller Succeeded");
+                break;
+            default:
+                break;
+        }
         [_theTableView reloadData];
     }];
     [self presentViewController:loginController animated:YES completion:nil];
@@ -196,7 +261,7 @@
     [UIApplication sharedApplication].networkActivityIndicatorVisible = YES;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @autoreleasepool {
-            NSLog(@"%@",[[FHSTwitterEngine sharedEngine]getTimelineForUser:[[FHSTwitterEngine sharedEngine]authenticatedID] isID:YES count:10]);
+            NSLog(@"%@",[[FHSTwitterEngine sharedEngine]getTimelineForUser:FHSTwitterEngine.sharedEngine.accessToken.username isID:YES count:10]);
             
             dispatch_sync(dispatch_get_main_queue(), ^{
                 @autoreleasepool {
@@ -216,7 +281,6 @@
 }
 
 - (void)toggleStreaming {
-    NSLog(@"Streaming");
     if (!_isStreaming) {
         self.isStreaming = YES;
         [[FHSTwitterEngine sharedEngine]streamSampleStatusesWithBlock:^(id result, BOOL *stop) {
