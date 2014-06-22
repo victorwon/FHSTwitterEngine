@@ -98,7 +98,7 @@
                                                                      }];
 }
 
-- (id)searchTweetsWithQuery:(NSString *)q count:(int)count resultType:(FHSTwitterEngineResultType)resultType until:(NSDate *)untilDate sinceID:(NSString *)sinceID maxID:(NSString *)maxID {
+- (id)searchTweetsWithQuery:(NSString *)q count:(int)count resultType:(FHSTwitterEngineResultType)resultType unil:(NSDate *)untilDate sinceID:(NSString *)sinceID maxID:(NSString *)maxID {
     
     if (count == 0) {
         return nil;
@@ -126,12 +126,6 @@
         params[@"until"] = [formatter stringFromDate:untilDate];
     }
     
-    if (untilDate) {
-        [_dateFormatter setDateFormat:@"yyyy-MM-dd"];
-        params[@"until"] = [_dateFormatter stringFromDate:untilDate];
-    }
-    [_dateFormatter setDateFormat:@"EEE MMM dd HH:mm:ss ZZZZ yyyy"];
-
     switch (resultType) {
         case FHSTwitterEngineResultTypeMixed:
             params[@"result_type"] = @"mixed";
